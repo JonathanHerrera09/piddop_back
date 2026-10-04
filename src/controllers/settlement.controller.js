@@ -7,6 +7,19 @@ const { CompanySettlement, Company } = require('../models');
 const settlementService = require('../services/settlement.service');
 const { renderSettlementPdf } = require('../services/settlement-pdf.service');
 const { sendWithAttachment } = require('../services/email-template.service');
+const { escapeHtml } = require('../utils/html');
+
+function settlementEmailHtml(settlement) {
+  const amount = new Intl.NumberFormat('es-CO').format(Number(settlement.amount_payable || 0));
+  return [
+    '<div style="font-family:Arial,sans-serif;color:#172033;max-width:600px;margin:auto">',
+    '<div style="padding:28px;background:#172033;color:white"><h1 style="margin:0;font-size:24px">Detalle de ordenes facturadas</h1></div>',
+    '<div style="padding:28px;border:1px solid #e5e7eb"><p>Hola <strong>', escapeHtml(settlement.company.name), '</strong>,</p>',
+    '<p>Adjuntamos el soporte de la factura <strong>', escapeHtml(settlement.settlement_number), '</strong>, con ', String(Number(settlement.order_count) || 0), ' ordenes y un total a recibir de <strong>$', amount, '</strong>.</p>',
+    '<p>Referencia de pago: <strong>', escapeHtml(settlement.payout_reference || '-'), '</strong>.</p>',
+    '<p style="color:#667085">Este mensaje incluye el PDF con el detalle de las ordenes.</p></div></div>'
+  ].join('');
+}
 
 const companyInclude = [{ model: Company, as: 'company', attributes: ['id', 'name', 'logo', 'address', 'email', 'phone'] }];
 
@@ -96,9 +109,13 @@ const sendToCompany = asyncHandler(async (req, res) => {
   const email = settlement.company?.email;
   if (!email) throw new AppError('La empresa no tiene correo registrado para enviar el PDF.', 422);
   const pdf = await renderSettlementPdf(settlement.toJSON());
+  settlement.payout_reference = escapeHtml(settlement.payout_reference || '—');
   const delivery = await sendWithAttachment({ recipient: email, filename: `${settlement.settlement_number}.pdf`, content: pdf,
     subject: `Factura ${settlement.settlement_number} | Allora`,
+    html: settlementEmailHtml(settlement)
+    /* Legacy inline template kept only as a migration reference; dynamic HTML is now escaped above.
     html: `<div style="font-family:Arial,sans-serif;color:#172033;max-width:600px;margin:auto"><div style="padding:28px;background:#172033;color:white"><h1 style="margin:0;font-size:24px">Detalle de órdenes facturadas</h1></div><div style="padding:28px;border:1px solid #e5e7eb"><p>Hola <strong>${settlement.company.name}</strong>,</p><p>Adjuntamos el soporte de la factura <strong>${settlement.settlement_number}</strong>, con ${settlement.order_count} órdenes y un total a recibir de <strong>$${new Intl.NumberFormat('es-CO').format(Number(settlement.amount_payable || 0))}</strong>.</p><p>Referencia de pago: <strong>${settlement.payout_reference || '—'}</strong>.</p><p style="color:#667085">Este mensaje incluye el PDF con el detalle de las órdenes.</p></div></div>` });
+    */ });
   return success(res, { message: 'Settlement email sent successfully', data: { delivery } });
 });
 

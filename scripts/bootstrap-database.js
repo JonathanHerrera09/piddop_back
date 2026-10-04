@@ -1,5 +1,6 @@
 const { spawnSync } = require('node:child_process');
 const mysql = require('mysql2/promise');
+const { buildDatabaseSsl } = require('../src/config/database');
 require('dotenv').config();
 
 const database = process.env.DB_NAME || 'allorajd';
@@ -8,7 +9,7 @@ async function run(command, args) {
   const executable = process.platform === 'win32' ? `${command}.cmd` : command;
   const result = spawnSync(executable, args, {
     encoding: 'utf8',
-    shell: process.platform === 'win32'
+    shell: false
   });
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
@@ -21,7 +22,8 @@ async function main() {
     host: process.env.DB_HOST || 'localhost',
     port: Number(process.env.DB_PORT || 3306),
     user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || ''
+    password: process.env.DB_PASSWORD || '',
+    ssl: buildDatabaseSsl()
   });
 
   await connection.query('CREATE DATABASE IF NOT EXISTS ?? CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci', [database]);

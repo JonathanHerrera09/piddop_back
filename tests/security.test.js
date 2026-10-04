@@ -2,6 +2,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { hasExpectedImageSignature } = require('../src/middlewares/upload.middleware');
 const { MIN_SECRET_LENGTH, swaggerEnabled, validateSecurityConfiguration } = require('../src/config/security');
+const { buildDatabaseSsl } = require('../src/config/database');
+const { escapeHtml } = require('../src/utils/html');
 
 test('image uploads require content signatures that match their claimed MIME type', () => {
   assert.equal(hasExpectedImageSignature({ mimetype: 'image/jpeg', buffer: Buffer.from([0xff, 0xd8, 0xff, 0xdb]) }), true);
@@ -30,4 +32,15 @@ test('production refuses missing or weak JWT secrets', () => {
     NODE_ENV: 'production', CORS_ORIGIN: 'https://panel.example.com',
     JWT_ACCESS_SECRET: 'a'.repeat(MIN_SECRET_LENGTH), JWT_REFRESH_SECRET: 'b'.repeat(MIN_SECRET_LENGTH)
   }));
+});
+
+test('database TLS is mandatory in production and validates the server certificate by default', () => {
+  assert.equal(buildDatabaseSsl({ NODE_ENV: 'development' }), undefined);
+  assert.deepEqual(buildDatabaseSsl({ NODE_ENV: 'production' }), { rejectUnauthorized: true, minVersion: 'TLSv1.2' });
+  assert.equal(buildDatabaseSsl({ NODE_ENV: 'production', DB_SSL_CA: 'line1\\nline2' }).ca, 'line1\nline2');
+});
+
+test('HTML inserted into settlement emails is escaped', () => {
+  assert.equal(escapeHtml('<img src=x onerror=alert(1)>'), '&lt;img src=x onerror=alert(1)&gt;');
+  assert.equal(escapeHtml(`Tom & Jerry's "shop"`), 'Tom &amp; Jerry&#39;s &quot;shop&quot;');
 });

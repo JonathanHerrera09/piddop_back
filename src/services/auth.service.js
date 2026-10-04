@@ -28,8 +28,8 @@ function createTokens(user) {
   // A unique jti prevents two rapid logins from producing the same refresh JWT
   // (the database intentionally enforces a unique token hash).
   const refreshToken = jwt.sign({ sub: String(user.id), type: 'refresh', jti: crypto.randomUUID() }, process.env.JWT_REFRESH_SECRET, { expiresIn: refreshExpiresIn });
-  const { exp } = jwt.decode(refreshToken);
-  return { accessToken, refreshToken, refreshExpiresAt: new Date(exp * 1000) };
+  const verifiedRefresh = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, { algorithms: ['HS256'] });
+  return { accessToken, refreshToken, refreshExpiresAt: new Date(verifiedRefresh.exp * 1000) };
 }
 
 async function issueTokens(user, transaction) {

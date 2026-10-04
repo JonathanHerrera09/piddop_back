@@ -13,10 +13,21 @@ function timestamp() {
   return `${now.getFullYear()}${part(now.getMonth() + 1)}${part(now.getDate())}_${part(now.getHours())}${part(now.getMinutes())}${part(now.getSeconds())}`;
 }
 
-async function insertRows(connection, table, columns, rows) {
+const resetColumns = Object.freeze({
+  roles: ['name', 'description', 'scope', 'created_at', 'updated_at'],
+  permissions: ['code', 'name', 'module', 'description', 'status', 'created_at', 'updated_at'],
+  role_permissions: ['role_id', 'permission_id', 'create_permission', 'update_permission', 'delete_permission', 'view_permission', 'execute_permission', 'created_at', 'updated_at'],
+  categories: ['name', 'icon', 'type', 'status', 'created_at', 'updated_at'],
+  users: ['role_id', 'name', 'last_name', 'email', 'phone', 'google_sub', 'password', 'profile_image', 'status', 'created_at', 'updated_at']
+});
+
+async function insertRows(connection, table, rows) {
   if (!rows.length) return;
-  const sql = `INSERT INTO ${quoteIdentifier(table)} (${columns.map(quoteIdentifier).join(', ')}) VALUES ?`;
-  await connection.query(sql, [rows.map((row) => columns.map((column) => row[column]))]);
+  const columns = resetColumns[table];
+  if (!columns) throw new Error(`Unsupported reset table: ${table}`);
+  const placeholders = rows.map(() => `(${columns.map(() => '?').join(', ')})`).join(', ');
+  const values = rows.flatMap((row) => columns.map((column) => row[column]));
+  await connection.execute(`INSERT INTO ${quoteIdentifier(table)} (${columns.map(quoteIdentifier).join(', ')}) VALUES ${placeholders}`, values);
 }
 
 async function main() {
@@ -111,29 +122,23 @@ async function main() {
       await connection.query(`TRUNCATE TABLE ${quoteIdentifier(database)}.${quoteIdentifier(tableName)}`);
     }
 
-    await insertRows(connection, 'roles', ['name', 'description', 'scope', 'created_at', 'updated_at'], roles);
-    await insertRows(connection, 'permissions', ['code', 'name', 'module', 'description', 'status', 'created_at', 'updated_at'], permissions);
+    await insertRows(connection, 'roles', roles);
+    await insertRows(connection, 'permissions', permissions);
 
     const [rebuiltRoles] = await connection.query('SELECT id, name FROM roles');
     const [rebuiltPermissions] = await connection.query('SELECT id, code FROM permissions');
     const roleIds = new Map(rebuiltRoles.map((row) => [row.name, row.id]));
     const permissionIds = new Map(rebuiltPermissions.map((row) => [row.code, row.id]));
-    await insertRows(connection, 'role_permissions', [
-      'role_id', 'permission_id', 'create_permission', 'update_permission', 'delete_permission',
-      'view_permission', 'execute_permission', 'created_at', 'updated_at'
-    ], rolePermissions.map((row) => ({
+    await insertRows(connection, 'role_permissions', rolePermissions.map((row) => ({
       ...row,
       role_id: roleIds.get(row.role_name),
       permission_id: permissionIds.get(row.permission_code)
     })));
 
-    await insertRows(connection, 'categories', ['name', 'icon', 'type', 'status', 'created_at', 'updated_at'], categories);
+    await insertRows(connection, 'categories', categories);
 
     const master = masters[0];
-    await insertRows(connection, 'users', [
-      'role_id', 'name', 'last_name', 'email', 'phone', 'google_sub', 'password',
-      'profile_image', 'status', 'created_at', 'updated_at'
-    ], [{ ...master, role_id: roleIds.get('SUPER_ADMIN') }]);
+    await insertRows(connection, 'users', [{ ...master, role_id: roleIds.get('SUPER_ADMIN') }]);
 
     await connection.query(`SET FOREIGN_KEY_CHECKS = ${previousForeignKeyChecks ? 1 : 0}`);
 

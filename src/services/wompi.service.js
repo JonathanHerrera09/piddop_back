@@ -28,8 +28,10 @@ function decryptSecret(value) {
   if (!String(value).startsWith('v1:')) return String(value);
   const [, iv, tag, encrypted] = String(value).split(':');
   try {
-    const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(iv, 'base64'));
-    decipher.setAuthTag(Buffer.from(tag, 'base64'));
+    const authenticationTag = Buffer.from(tag, 'base64');
+    if (authenticationTag.length !== 16) throw new Error('Invalid GCM authentication tag');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', encryptionKey(), Buffer.from(iv, 'base64'), { authTagLength: 16 });
+    decipher.setAuthTag(authenticationTag);
     return Buffer.concat([decipher.update(Buffer.from(encrypted, 'base64')), decipher.final()]).toString('utf8');
   } catch {
     throw new AppError('No fue posible descifrar la configuracion de Wompi.', 500);

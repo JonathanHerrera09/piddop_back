@@ -10,6 +10,9 @@ const { allowedOrigins } = require('./config/cors');
 const { swaggerEnabled } = require('./config/security');
 
 function createApp() {
+  // The API authenticates exclusively with Authorization: Bearer tokens, never cookies.
+  // Browser cross-site requests therefore cannot carry credentials; CORS remains restricted.
+  // nosemgrep: javascript.express.security.audit.express-check-csurf-middleware-usage
   const app = express();
   const origins = allowedOrigins();
   const trustProxy = process.env.TRUST_PROXY;
