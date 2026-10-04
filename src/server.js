@@ -2,10 +2,12 @@ const http = require('node:http');
 const { createApp } = require('./app');
 const { sequelize } = require('./models');
 const { configureSocket } = require('./websocket');
+const { validateSecurityConfiguration } = require('./config/security');
 
 const port = Number(process.env.PORT || 3000);
 
 async function startServer() {
+  validateSecurityConfiguration();
   await sequelize.authenticate();
 
   const app = createApp();

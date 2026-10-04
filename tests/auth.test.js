@@ -16,9 +16,23 @@ const originalRandomInt = crypto.randomInt;
 crypto.randomInt = () => 123456;
 
 test('Super Admin can log in and access protected role permissions', async () => {
+  const identity = uniqueIdentity('super-admin');
+  const role = await Role.findOne({ where: { name: 'SUPER_ADMIN', scope: 'platform' } });
+  assert.ok(role, 'SUPER_ADMIN role must be seeded for access-control tests');
+  const password = 'Test-only-super-admin-password';
+  await User.create({
+    role_id: role.id,
+    name: 'Test',
+    last_name: 'Administrator',
+    email: identity.email,
+    phone: identity.phone,
+    password: await bcrypt.hash(password, 12),
+    status: 'active'
+  });
+
   const login = await request(app).post('/api/v1/auth/login').send({
-    email: process.env.SUPER_ADMIN_EMAIL,
-    password: process.env.SUPER_ADMIN_PASSWORD
+    email: identity.email,
+    password
   });
   assert.equal(login.status, 200);
   assert.equal(login.body.data.user.role.name, 'SUPER_ADMIN');
@@ -28,6 +42,7 @@ test('Super Admin can log in and access protected role permissions', async () =>
     .set('Authorization', `Bearer ${login.body.data.tokens.access_token}`);
   assert.equal(permissions.status, 200);
   assert.ok(permissions.body.data.permissions.length > 0);
+  await cleanupUser(identity.email);
 });
 
 test('protected auth endpoints reject missing tokens', async () => {

@@ -9,7 +9,7 @@ async function authMiddleware(req, res, next) {
       throw new AppError('Authentication token is required', 401);
     }
 
-    const payload = jwt.verify(authorization.slice(7), process.env.JWT_ACCESS_SECRET);
+    const payload = jwt.verify(authorization.slice(7), process.env.JWT_ACCESS_SECRET, { algorithms: ['HS256'] });
     if (payload.type !== 'access') throw new AppError('Invalid authentication token', 401);
 
     const user = await User.findByPk(payload.sub, { include: [{ model: Role, as: 'platformRole' }] });
@@ -27,7 +27,7 @@ async function authMiddleware(req, res, next) {
 
 function platformRoleMiddleware(...roles) {
   return (req, res, next) => {
-    if (!req.auth || !roles.includes(req.auth.user.platformRole.name)) {
+    if (!req.auth?.user?.platformRole || !roles.includes(req.auth.user.platformRole.name)) {
       return next(new AppError('You do not have permission to perform this action', 403));
     }
     return next();

@@ -7,6 +7,7 @@ const { configureSwagger } = require('./config/swagger');
 const { apiRateLimiter } = require('./middlewares/rate-limit.middleware');
 const { notFoundMiddleware, errorMiddleware } = require('./middlewares/error.middleware');
 const { allowedOrigins } = require('./config/cors');
+const { swaggerEnabled } = require('./config/security');
 
 function createApp() {
   const app = express();
@@ -19,7 +20,9 @@ function createApp() {
   } else if (trustProxy && !Number.isNaN(Number(trustProxy))) {
     app.set('trust proxy', Number(trustProxy));
   } else {
-    app.set('trust proxy', 1);
+    // Trusting an unspecified proxy lets clients spoof their IP through X-Forwarded-For,
+    // which defeats IP based rate limiting. Enable it explicitly when a trusted proxy exists.
+    app.set('trust proxy', false);
   }
   app.use(helmet());
   app.use(cors({ origin: origins, credentials: true }));
@@ -32,7 +35,7 @@ function createApp() {
   }));
   app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));
 
-  configureSwagger(app);
+  if (swaggerEnabled()) configureSwagger(app);
   app.use('/api/v1', apiRateLimiter, routes);
   app.use(notFoundMiddleware);
   app.use(errorMiddleware);

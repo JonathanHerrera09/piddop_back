@@ -11,7 +11,7 @@ function configureSocket(server) {
   io.use((socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
-      const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
+      const payload = jwt.verify(token, process.env.JWT_ACCESS_SECRET, { algorithms: ['HS256'] });
       if (payload.type !== 'access') throw new Error('Invalid token type');
       socket.userId = String(payload.sub);
       return next();
