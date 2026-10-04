@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const AppError = require('../utils/app-error');
-const { Appointment, Order, User } = require('../models');
+const { Appointment, AuthRefreshToken, Order, User } = require('../models');
+const { disconnectUser } = require('../websocket');
 
 const activeOrderStatuses = ['pending', 'accepted', 'preparing', 'waiting_delivery', 'on_the_way'];
 
@@ -70,6 +71,8 @@ async function suspendCustomerIfNeeded({ transaction, userId }) {
   }
 
   await User.update({ status: 'suspended' }, { where: { id: userId }, transaction });
+  await AuthRefreshToken.update({ revoked_at: new Date() }, { where: { user_id: userId, revoked_at: null }, transaction });
+  transaction.afterCommit(() => disconnectUser(userId, 'account_suspended'));
   return true;
 }
 

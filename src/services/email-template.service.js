@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const AppError = require('../utils/app-error');
 const { PlatformSetting } = require('../models');
+const { escapeHtml } = require('../utils/html');
 
 const EMAIL_TEMPLATES_KEY = 'email_templates';
 const TEMPLATE_KEYS = ['welcome', 'email_verification', 'purchase_thanks'];
@@ -63,8 +64,15 @@ async function saveTemplate(key, value) {
 }
 
 function renderTemplate(template, variables) {
-  const replace = (value) => value.replace(/{{\s*([a-z_]+)\s*}}/gi, (_match, key) => String(variables[key] ?? `{{${key}}}`));
-  return { subject: replace(template.subject), html: replace(template.html) };
+  const replace = (value, escapeValues) => value.replace(/{{\s*([a-z_]+)\s*}}/gi, (_match, key) => {
+    const variable = variables[key];
+    if (variable === undefined || variable === null) return `{{${key}}}`;
+    return escapeValues ? escapeHtml(variable) : String(variable);
+  });
+  return {
+    subject: replace(template.subject, false),
+    html: replace(template.html, true)
+  };
 }
 
 function createTransport() {

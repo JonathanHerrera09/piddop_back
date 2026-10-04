@@ -94,6 +94,29 @@ test('customer account deletion deactivates access and preserves the user record
   }
 });
 
+test('a refresh token can only be rotated once under concurrent requests', async () => {
+  const identity = uniqueIdentity('refresh-race');
+  const role = await Role.findOne({ where: { name: 'CUSTOMER', scope: 'platform' } });
+  const user = await User.create({
+    role_id: role.id, name: 'Refresh', last_name: 'Race', email: identity.email,
+    phone: identity.phone, password: await bcrypt.hash('TestPassword123!', 12), status: 'active'
+  });
+
+  try {
+    const login = await request(app).post('/api/v1/auth/login').send({ email: identity.email, password: 'TestPassword123!' });
+    assert.equal(login.status, 200);
+    const { refresh_token } = login.body.data.tokens;
+    const responses = await Promise.all([
+      request(app).post('/api/v1/auth/refresh').send({ refresh_token }),
+      request(app).post('/api/v1/auth/refresh').send({ refresh_token })
+    ]);
+    assert.deepEqual(responses.map((response) => response.status).sort(), [200, 401]);
+    assert.equal(await AuthRefreshToken.count({ where: { user_id: user.id, revoked_at: null } }), 1);
+  } finally {
+    await cleanupUser(identity.email);
+  }
+});
+
 test('register requires the emailed code before creating a CUSTOMER session', async () => {
   const identity = uniqueIdentity('customer');
   try {

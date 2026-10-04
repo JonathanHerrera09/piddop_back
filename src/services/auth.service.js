@@ -329,12 +329,25 @@ async function refresh(refreshToken) {
   let payload;
   try { payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET); } catch { throw new AppError('Invalid or expired refresh token', 401); }
   if (payload.type !== 'refresh') throw new AppError('Invalid refresh token', 401);
-  const stored = await AuthRefreshToken.findOne({ where: { token_hash: hashToken(refreshToken), revoked_at: null, expires_at: { [Op.gt]: new Date() } } });
-  if (!stored) throw new AppError('Invalid or revoked refresh token', 401);
-  const user = await User.findByPk(payload.sub, { include: [{ model: Role, as: 'platformRole' }] });
-  if (!user || user.status !== 'active') throw new AppError('User is not allowed to access this resource', 401);
-  await stored.update({ revoked_at: new Date() });
-  return issueTokens(user);
+  // Locking the token row makes rotation single-use even when two requests
+  // arrive at the same time with the same valid refresh token.
+  return sequelize.transaction(async (transaction) => {
+    const stored = await AuthRefreshToken.findOne({
+      where: { token_hash: hashToken(refreshToken), revoked_at: null, expires_at: { [Op.gt]: new Date() } },
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+    if (!stored) throw new AppError('Invalid or revoked refresh token', 401);
+
+    const user = await User.findByPk(payload.sub, {
+      include: [{ model: Role, as: 'platformRole' }],
+      transaction
+    });
+    if (!user || user.status !== 'active') throw new AppError('User is not allowed to access this resource', 401);
+
+    await stored.update({ revoked_at: new Date() }, { transaction });
+    return issueTokens(user, transaction);
+  });
 }
 
 async function logout(refreshToken) {
