@@ -1,0 +1,7 @@
+node_modules/
+.env
+coverage/
+uploads/
+*.log
+*firebase-adminsdk*.json
+google-services.json

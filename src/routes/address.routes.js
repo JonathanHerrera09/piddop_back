@@ -1,0 +1,2 @@
+const express = require('express'); const controller = require('../controllers/address.controller'); const { authMiddleware, platformRoleMiddleware } = require('../middlewares/auth.middleware');
+const router = express.Router(); router.use(authMiddleware, platformRoleMiddleware('CUSTOMER')); router.get('/', controller.list); router.post('/', controller.create); router.get('/:id', controller.get); router.put('/:id', controller.update); router.delete('/:id', controller.remove); router.put('/:id/default', controller.setDefault); module.exports = router;

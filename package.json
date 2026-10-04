@@ -1,0 +1,43 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend API for the orders and services platform.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test",
+    "db:migrate": "sequelize-cli db:migrate --config src/config/database.js",
+    "db:migrate:nested-variants": "node scripts/apply-nested-variants.js",
+    "db:migrate:product-variant-prices": "node scripts/apply-product-variant-prices.js",
+    "db:seed": "sequelize-cli db:seed:all --config src/config/database.js",
+    "dev:seeder": "node scripts/bootstrap-database.js",
+    "db:cleanup-demo": "node scripts/deduplicate-demo-companies.js",
+    "push:cleanup": "node scripts/cleanup-push-tokens.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.1",
+    "google-auth-library": "^11.0.2",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "mysql2": "^3.14.4",
+    "nodemailer": "^7.0.13",
+    "pdfkit": "^0.20.2",
+    "sequelize": "^6.37.7",
+    "socket.io": "^4.8.1",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "sequelize-cli": "^6.6.2",
+    "supertest": "^7.1.1"
+  }
+}

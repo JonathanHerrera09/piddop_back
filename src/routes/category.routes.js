@@ -1,0 +1,4 @@
+const express = require('express'); const controller = require('../controllers/category.controller'); const { authMiddleware, platformRoleMiddleware } = require('../middlewares/auth.middleware'); const { categoryAssetUpload, uploadErrorMiddleware } = require('../middlewares/upload.middleware');
+const publicRouter = express.Router(); publicRouter.get('/', controller.listPublic); publicRouter.get('/:id', controller.getPublic);
+const adminRouter = express.Router(); adminRouter.use(authMiddleware, platformRoleMiddleware('SUPER_ADMIN')); adminRouter.get('/', controller.listAdmin); adminRouter.post('/', controller.create); adminRouter.put('/:id', controller.update); adminRouter.delete('/:id', controller.remove); adminRouter.post('/:id/icon', categoryAssetUpload.single('icon'), uploadErrorMiddleware, controller.updateIcon);
+module.exports = { publicRouter, adminRouter };
