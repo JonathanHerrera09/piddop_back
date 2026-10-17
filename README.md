@@ -18,3 +18,7 @@ The command creates the database configured in `DB_NAME` (default: `allorajd`), 
 ## Database scope
 
 The initial schema contains all platform tables, including authentication tokens and audit logs. The physical schema is the source of truth during this foundation stage; business rules, associations, and model-level validations will be implemented with their respective modules.
+
+## Deploy with Docker
+
+Docker Compose and a GitHub Actions workflow are included for deployment to a VPS. The setup follows the Lumefy server pattern: GitHub Actions connects over SSH, updates the repository, and builds on the VPS; the API joins the shared Nginx Proxy Manager Docker network. Follow [the deployment guide](docs/deploy-docker.md) to configure it.
