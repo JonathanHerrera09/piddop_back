@@ -1,0 +1,63 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Deploy exact commit over SSH
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || 22 }}
+          TARGET_REVISION: ${{ github.sha }}
+        run: |
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_SSH_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          test -n "$DEPLOY_PATH"
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          deploy_path_b64=$(printf '%s' "$DEPLOY_PATH" | base64 -w0)
+          ssh \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=10 \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "DEPLOY_PATH_B64=$deploy_path_b64 TARGET_REVISION=$TARGET_REVISION sh -s" <<'REMOTE'
+          set -eu
+          deploy_path=$(printf '%s' "$DEPLOY_PATH_B64" | base64 -d)
+          cd "$deploy_path"
+          git diff --quiet
+          git diff --cached --quiet
+          git fetch --prune origin main
+          git cat-file -e "$TARGET_REVISION^{commit}"
+          git merge-base --is-ancestor "$TARGET_REVISION" origin/main
+          git checkout --detach "$TARGET_REVISION"
+          export IMAGE_TAG="$TARGET_REVISION"
+          docker compose config --quiet
+          docker compose build api
+          docker compose up -d --remove-orphans --wait --wait-timeout 180
+          docker image prune -f
+          REMOTE
