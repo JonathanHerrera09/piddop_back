@@ -50,7 +50,7 @@ const updateMe = asyncHandler(async (req, res) => {
 });
 
 const updatePassword = asyncHandler(async (req, res) => {
-  if (req.auth.user.google_sub) throw new AppError('Esta cuenta usa acceso con Google. Gestiona la contraseña desde ese proveedor.', 422);
+  if (req.auth.user.google_sub || req.auth.user.apple_sub) throw new AppError('Esta cuenta usa acceso con Google o Apple. Gestiona la contraseña desde ese proveedor.', 422);
   const { current_password, password, password_confirmation } = req.body || {};
   if (!current_password || !password || password.length < 8 || password !== password_confirmation) throw new AppError('La nueva contraseña debe tener al menos 8 caracteres y coincidir.', 422);
   if (!await bcrypt.compare(current_password, req.auth.user.password)) throw new AppError('La contraseña actual no es correcta.', 422);

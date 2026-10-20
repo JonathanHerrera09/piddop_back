@@ -29,6 +29,7 @@ const settlementRoutes = require('./settlement.routes');
 const emailTemplateRoutes = require('./email-template.routes');
 const wompiRoutes = require('./wompi.routes');
 const reviewRoutes = require('./review.routes');
+const supportTicketRoutes = require('./support-ticket.routes');
 
 const router = express.Router();
 
@@ -73,6 +74,8 @@ router.use('/admin/email-templates', emailTemplateRoutes);
 router.use('/admin/platform-settings/wompi', wompiRoutes.adminRouter);
 router.use('/payments/wompi', wompiRoutes.publicRouter);
 router.use('/mobile', mobileRoutes);
+router.use('/', supportTicketRoutes.customer);
+router.use('/admin', supportTicketRoutes.admin);
 router.use('/admin', settlementRoutes.admin);
 router.use('/company', settlementRoutes.company);
 

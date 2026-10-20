@@ -33,6 +33,12 @@ const googleMobileLogin = asyncHandler(async (req, res) => {
   return success(res, { message: 'Google login successful', data: result });
 });
 
+const appleMobileLogin = asyncHandler(async (req, res) => {
+  required(req.body, ['id_token']);
+  const result = await authService.loginWithApple(req.body.id_token, req.body);
+  return success(res, { message: 'Apple login successful', data: result });
+});
+
 const refresh = asyncHandler(async (req, res) => {
   required(req.body, ['refresh_token']);
   return success(res, { message: 'Token refreshed successfully', data: await authService.refresh(req.body.refresh_token) });
@@ -59,4 +65,4 @@ const resetPassword = asyncHandler(async (req, res) => {
 
 const me = asyncHandler(async (req, res) => success(res, { message: 'Authenticated user retrieved successfully', data: authService.publicUser(req.auth.user) }));
 
-module.exports = { register, verifyRegistration, login, googleMobileLogin, refresh, logout, forgotPassword, resetPassword, me };
+module.exports = { register, verifyRegistration, login, googleMobileLogin, appleMobileLogin, refresh, logout, forgotPassword, resetPassword, me };

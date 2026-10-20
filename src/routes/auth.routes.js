@@ -8,6 +8,7 @@ router.post('/register', authRateLimiter, controller.register);
 router.post('/register/verify', authRateLimiter, controller.verifyRegistration);
 router.post('/login', authRateLimiter, controller.login);
 router.post('/google/mobile', authRateLimiter, controller.googleMobileLogin);
+router.post('/apple/mobile', authRateLimiter, controller.appleMobileLogin);
 router.post('/logout', controller.logout);
 router.post('/refresh', authRateLimiter, controller.refresh);
 router.post('/forgot-password', authRateLimiter, controller.forgotPassword);

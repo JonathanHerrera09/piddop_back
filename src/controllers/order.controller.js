@@ -1,6 +1,6 @@
 const crypto = require('node:crypto');
 const AppError = require('../utils/app-error'); const asyncHandler = require('../utils/async-handler'); const { success } = require('../utils/api-response');
-const { sequelize, Cart, CartItem, CartItemVariant, CartItemIngredient, CustomerAddress, Product, ProductIngredient, VariantOption, Company, Order, OrderItem, OrderItemVariant, OrderItemIngredient, OrderStatusHistory, CompanyReview, User, Delivery, DeliveryDriver, Coupon, CouponUsage, Payment } = require('../models');
+const { sequelize, Cart, CartItem, CartItemVariant, CartItemIngredient, CustomerAddress, Product, ProductIngredient, Variant, VariantOption, ProductVariantOptionPrice, Company, Order, OrderItem, OrderItemVariant, OrderItemIngredient, OrderStatusHistory, CompanyReview, User, Delivery, DeliveryDriver, Coupon, CouponUsage, Payment } = require('../models');
 const { validateCoupon } = require('../services/coupon.service');
 const { assertPointWithinGlobalCoverage } = require('../services/platform-coverage.service');
 const { assertCustomerCanCreateOrder, isPenaltyFreeOrderCancellation, suspendCustomerIfNeeded } = require('../services/customer-rules.service');
@@ -8,6 +8,7 @@ const { notifyUser, notifyCompany, notifyAvailableDrivers, emitCompany } = requi
 const walletService = require('../services/company-wallet.service');
 const emailTemplateService = require('../services/email-template.service');
 const { assertCompanyOpen } = require('../services/company-availability.service');
+const { validateVariantSelections } = require('../services/variant-selection.service');
 const { emitToUser } = require('../websocket');
 const { buildCheckout, getWompiConfiguration, getWompiTransaction } = require('../services/wompi.service');
 const orderInclude = [{ model: Company, as: 'company', attributes: ['id', 'name', 'type', 'rating'] }, { model: CompanyReview, as: 'review', attributes: ['id', 'rating', 'comment', 'created_at'] }, { model: CustomerAddress, as: 'address' }, { model: OrderItem, as: 'items', include: [{ model: OrderItemVariant, as: 'variants' }, { model: OrderItemIngredient, as: 'ingredientAdjustments' }] }, { model: OrderStatusHistory, as: 'history', include: [{ model: User, as: 'changedBy', attributes: ['id', 'name', 'last_name'] }] }];
@@ -85,6 +86,84 @@ const create = asyncHandler(async (req, res) => {
 });
 const listCustomer = asyncHandler(async (req, res) => success(res, { message: 'Orders retrieved successfully', data: { orders: await Order.findAll({ where: { customer_id: req.auth.user.id }, include: orderInclude, order: [['id', 'DESC']] }) } }));
 const getCustomer = asyncHandler(async (req, res) => success(res, { message: 'Order retrieved successfully', data: { order: await ownOrder(req.params.id, req.auth.user.id) } }));
+
+const copyToCart = asyncHandler(async (req, res) => {
+  const copied = await sequelize.transaction(async (transaction) => {
+    const sourceOrder = await Order.findOne({
+      where: { id: req.params.id, customer_id: req.auth.user.id },
+      include: [{ model: OrderItem, as: 'items', include: [{ model: OrderItemVariant, as: 'variants' }, { model: OrderItemIngredient, as: 'ingredientAdjustments' }] }],
+      transaction,
+      lock: transaction.LOCK.UPDATE
+    });
+    if (!sourceOrder) throw new AppError('Pedido no encontrado.', 404);
+    if (sourceOrder.order_status !== 'delivered') throw new AppError('Solo puedes copiar pedidos entregados.', 409);
+    if (!sourceOrder.items.length) throw new AppError('Este pedido no tiene productos para copiar.', 422);
+
+    const company = await Company.findByPk(sourceOrder.company_id, { transaction });
+    if (!company || company.status !== 'active') throw new AppError('Este negocio ya no esta disponible.', 422);
+    assertCompanyOpen(company);
+
+    const existingCart = await Cart.findOne({ where: { customer_id: req.auth.user.id }, transaction, lock: transaction.LOCK.UPDATE });
+    if (existingCart) await existingCart.destroy({ transaction });
+    const cart = await Cart.create({ customer_id: req.auth.user.id, company_id: sourceOrder.company_id }, { transaction });
+
+    for (const sourceItem of sourceOrder.items) {
+      const product = await Product.findOne({ where: { id: sourceItem.product_id, company_id: sourceOrder.company_id, status: 'active' }, transaction });
+      if (!product) throw new AppError(`El producto "${sourceItem.product_name}" ya no esta disponible.`, 422);
+
+      const sourceVariants = sourceItem.variants || [];
+      const optionNames = [...new Set(sourceVariants.map((variant) => variant.option_name))];
+      const availableOptions = optionNames.length
+        ? await VariantOption.findAll({
+            where: { name: optionNames, status: 'active' },
+            include: [{ model: Variant, include: [{ model: Product, as: 'products', where: { id: product.id }, through: { attributes: [] }, attributes: [] }] }],
+            transaction
+          })
+        : [];
+      const selectedOptions = sourceVariants.map((sourceVariant) =>
+        availableOptions.find((option) => option.name === sourceVariant.option_name && option.Variant?.name === sourceVariant.variant_name)
+      );
+      if (selectedOptions.some((option) => !option)) {
+        throw new AppError(`Una opción de "${sourceItem.product_name}" ya no esta disponible.`, 422);
+      }
+      const optionIds = selectedOptions.map((option) => option.id);
+      const productVariants = await Variant.findAll({
+        include: [
+          { model: Product, as: 'products', where: { id: product.id }, through: { attributes: [] }, attributes: [] },
+          { model: VariantOption, as: 'options', required: false, include: [{ model: Variant, as: 'childVariants', required: false, include: [{ model: VariantOption, as: 'options' }] }] }
+        ],
+        transaction
+      });
+      validateVariantSelections(productVariants, optionIds);
+
+      const sourceIngredientNames = [...new Set((sourceItem.ingredientAdjustments || []).filter((item) => item.action === 'remove').map((item) => item.ingredient_name))];
+      const ingredients = sourceIngredientNames.length
+        ? await ProductIngredient.findAll({ where: { product_id: product.id, name: sourceIngredientNames, status: 'active', is_removable: true }, transaction })
+        : [];
+      if (ingredients.length !== sourceIngredientNames.length) {
+        throw new AppError(`Un ingrediente de "${sourceItem.product_name}" ya no se puede modificar.`, 422);
+      }
+
+      const cartItem = await CartItem.create({
+        cart_id: cart.id,
+        product_id: product.id,
+        quantity: sourceItem.quantity,
+        unit_base_price: product.base_price,
+        customer_notes: sourceItem.customer_notes
+      }, { transaction });
+      if (selectedOptions.length) {
+        const prices = await ProductVariantOptionPrice.findAll({ where: { product_id: product.id, variant_option_id: optionIds }, transaction });
+        const priceByOption = new Map(prices.map((price) => [String(price.variant_option_id), Number(price.additional_price || 0)]));
+        await CartItemVariant.bulkCreate(selectedOptions.map((option) => ({ cart_item_id: cartItem.id, variant_option_id: option.id, additional_price: priceByOption.get(String(option.id)) || 0 })), { transaction });
+      }
+      if (ingredients.length) await CartItemIngredient.bulkCreate(ingredients.map((ingredient) => ({ cart_item_id: cartItem.id, ingredient_id: ingredient.id, action: 'remove' })), { transaction });
+    }
+
+    return { cartId: cart.id, itemsCount: sourceOrder.items.length };
+  });
+
+  return success(res, { message: 'Pedido copiado al carrito.', data: copied });
+});
 
 function storedWompiTransactionId(payment) {
   return payment?.provider_response?.transaction_id || null;
@@ -272,4 +351,4 @@ const accept = asyncHandler((req, res) => transition(req, res, 'accepted', ['pen
 const reject = asyncHandler((req, res) => transition(req, res, 'rejected', ['pending'], null, true));
 const preparing = asyncHandler((req, res) => transition(req, res, 'preparing', ['accepted'], 'Preparation started'));
 const waitingDelivery = asyncHandler((req, res) => transition(req, res, 'waiting_delivery', ['preparing'], 'Ready for delivery'));
-module.exports = { create, listCustomer, getCustomer, retryCustomerPayment, cancel, tracking, listCompany, getCompany, accept, reject, preparing, waitingDelivery };
+module.exports = { create, listCustomer, getCustomer, copyToCart, retryCustomerPayment, cancel, tracking, listCompany, getCompany, accept, reject, preparing, waitingDelivery };

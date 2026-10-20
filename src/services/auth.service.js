@@ -2,6 +2,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
+const { createRemoteJWKSet, jwtVerify } = require('jose');
 const { Op } = require('sequelize');
 const AppError = require('../utils/app-error');
 const { accessExpiresIn, webAccessExpiresIn, refreshExpiresIn } = require('../config/auth');
@@ -10,11 +11,12 @@ const emailTemplateService = require('./email-template.service');
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const LEGAL_DOCUMENT_VERSION = '2026-10-03';
+const appleJwks = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
 
 function publicUser(user) {
   return {
     id: user.id, name: user.name, last_name: user.last_name, email: user.email,
-    phone: user.phone, profile_image: user.profile_image, status: user.status, has_password: !user.google_sub,
+    phone: user.phone, profile_image: user.profile_image, status: user.status, has_password: !user.google_sub && !user.apple_sub,
     role: user.platformRole ? { id: user.platformRole.id, name: user.platformRole.name, scope: user.platformRole.scope } : undefined
   };
 }
@@ -60,6 +62,13 @@ async function verifyGoogleIdToken(idToken) {
   });
 
   return ticket.getPayload();
+}
+
+async function verifyAppleIdToken(idToken) {
+  const audience = process.env.APPLE_OAUTH_CLIENT_ID;
+  if (!audience) throw new AppError('Apple OAuth is not configured on the server', 500);
+  const { payload } = await jwtVerify(idToken, appleJwks, { audience, issuer: 'https://appleid.apple.com' });
+  return payload;
 }
 
 function normalizePhone(value) {
@@ -325,6 +334,58 @@ async function loginWithGoogle(idToken, phone, legalAcceptance) {
   }
 }
 
+async function loginWithApple(idToken, input = {}) {
+  let payload;
+  try {
+    payload = await verifyAppleIdToken(idToken);
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError('No pudimos validar tu cuenta de Apple.', 401);
+  }
+
+  if (!payload?.sub) throw new AppError('Apple no entregó una identidad válida.', 422);
+  const appleSub = String(payload.sub);
+  let user = await User.findOne({ where: { apple_sub: appleSub }, include: [{ model: Role, as: 'platformRole' }] });
+  if (user) {
+    if (user.platformRole?.name !== 'CUSTOMER') throw new AppError('Esta cuenta no puede iniciar sesión en la app de cliente.', 403);
+    if (user.status !== 'active') throw new AppError('Esta cuenta no está activa.', 403);
+    return { user: publicUser(user), tokens: await issueTokens(user) };
+  }
+
+  const email = typeof payload.email === 'string' ? payload.email.trim().toLowerCase() : '';
+  if (!email || (payload.email_verified !== true && payload.email_verified !== 'true')) {
+    throw new AppError('Apple no entregó un correo verificado. Intenta continuar de nuevo con Apple.', 422);
+  }
+  const emailUser = await findUserWithRoleByEmail(email);
+  if (emailUser) {
+    if (emailUser.platformRole?.name !== 'CUSTOMER') throw new AppError('Este correo no puede iniciar sesión en la app de cliente.', 403);
+    if (emailUser.status !== 'active') throw new AppError('Esta cuenta no está activa.', 403);
+    if (emailUser.apple_sub && emailUser.apple_sub !== appleSub) throw new AppError('Este correo ya está vinculado a otra cuenta de Apple.', 409);
+    await emailUser.update({ apple_sub: appleSub, email_verified_at: emailUser.email_verified_at || new Date() });
+    return { user: publicUser(emailUser), tokens: await issueTokens(emailUser) };
+  }
+
+  if (input.legal_acceptance !== true) throw new AppError('Debes aceptar los Términos y autorizar el tratamiento de datos para crear tu cuenta.', 422, [], 'APPLE_LEGAL_ACCEPTANCE_REQUIRED');
+  const normalizedPhone = normalizePhone(input.phone);
+  if (!normalizedPhone) throw new AppError('Necesitamos tu teléfono para crear tu cuenta.', 422, [], 'APPLE_PHONE_REQUIRED');
+  if (await User.findOne({ where: { phone: normalizedPhone } })) throw new AppError('Ese teléfono ya está registrado.', 409);
+  const customerRole = await Role.findOne({ where: { name: 'CUSTOMER', scope: 'platform' } });
+  if (!customerRole) throw new AppError('Customer role is not configured', 500);
+  const firstName = String(input.first_name || 'Usuario').trim().slice(0, 100) || 'Usuario';
+  const lastName = String(input.last_name || 'Apple').trim().slice(0, 100) || 'Apple';
+  try {
+    return await sequelize.transaction(async (transaction) => {
+      user = await User.create({ role_id: customerRole.id, name: firstName, last_name: lastName, email, phone: normalizedPhone, apple_sub: appleSub, password: await bcrypt.hash(crypto.randomBytes(32).toString('hex'), 12), email_verified_at: new Date(), status: 'active' }, { transaction });
+      await UserLegalAcceptance.create({ user_id: user.id, document_key: 'terms_and_data_authorization', document_version: LEGAL_DOCUMENT_VERSION, accepted_at: new Date(), source: 'mobile_apple_registration' }, { transaction });
+      user.platformRole = customerRole;
+      return { user: publicUser(user), tokens: await issueTokens(user, transaction) };
+    });
+  } catch (error) {
+    if (isUniqueError(error)) throw new AppError('El correo, teléfono o cuenta de Apple ya está registrado.', 409);
+    throw error;
+  }
+}
+
 async function refresh(refreshToken) {
   let payload;
   try { payload = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET); } catch { throw new AppError('Invalid or expired refresh token', 401); }
@@ -374,4 +435,4 @@ async function resetPassword(token, password) {
   });
 }
 
-module.exports = { publicUser, register, verifyRegistration, login, loginWithGoogle, refresh, logout, requestPasswordReset, resetPassword };
+module.exports = { publicUser, register, verifyRegistration, login, loginWithGoogle, loginWithApple, refresh, logout, requestPasswordReset, resetPassword };
