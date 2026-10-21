@@ -8,5 +8,7 @@ router.use(authMiddleware, platformRoleMiddleware('SUPER_ADMIN'));
 router.get('/customers', controller.listAdminCustomers);
 router.get('/customers/:id', controller.getAdminCustomer);
 router.post('/customers/:id/activate', controller.activateAdminCustomer);
+router.delete('/customers/:id/orders', controller.clearAdminCustomerOrders);
+router.delete('/customers/:id', controller.eraseAdminCustomerData);
 
 module.exports = router;

@@ -2,7 +2,8 @@ const { Op, fn, col } = require('sequelize');
 const asyncHandler = require('../utils/async-handler');
 const { success } = require('../utils/api-response');
 const AppError = require('../utils/app-error');
-const { User, Role, CustomerAddress, Order, Appointment, Company } = require('../models');
+const crypto = require('node:crypto');
+const { sequelize, User, Role, CustomerAddress, Cart, Order, Appointment, Company, CompanyReview, CouponUsage, SupportTicket, Notification, PushToken, AuthRefreshToken, PasswordResetToken, UserLegalAcceptance, Delivery, Payment, CompanySettlementItem, WalletTransaction } = require('../models');
 const { paginate } = require('../utils/pagination');
 
 function monthRange(date = new Date()) {
@@ -140,7 +141,9 @@ async function buildCustomerPageSummaries(customers) {
 
 const listAdminCustomers = asyncHandler(async (req, res) => {
   const roleId = await customerRoleId();
-  const where = { role_id: roleId };
+  // Erased accounts are retained only as anonymous accounting references and
+  // must not appear as customer profiles in the administration list.
+  const where = { role_id: roleId, email: { [Op.notLike]: 'deleted-%@deleted.invalid' } };
   if (req.query.status) where.status = req.query.status;
   if (req.query.search) where[Op.or] = [{ name: { [Op.like]: `%${req.query.search}%` } }, { last_name: { [Op.like]: `%${req.query.search}%` } }, { email: { [Op.like]: `%${req.query.search}%` } }, { phone: { [Op.like]: `%${req.query.search}%` } }];
   const page = await paginate(User, { where, allowedSort: { id: 'id', name: 'name', email: 'email', created_at: 'created_at' } }, req.query);
@@ -195,8 +198,120 @@ const activateAdminCustomer = asyncHandler(async (req, res) => {
   });
 });
 
+// Removes an order history only when it has not entered an operational or
+// financial process. This keeps deliveries, settlements and wallet balances
+// consistent while still allowing administrators to reset test/customer data.
+const clearAdminCustomerOrders = asyncHandler(async (req, res) => {
+  const roleId = await customerRoleId();
+  const customer = await User.findOne({ where: { id: req.params.id, role_id: roleId } });
+  if (!customer) throw new AppError('Customer not found', 404);
+
+  const orders = await Order.findAll({
+    where: { customer_id: customer.id },
+    attributes: ['id'],
+    transaction: undefined
+  });
+  const orderIds = orders.map((order) => order.id);
+
+  if (!orderIds.length) {
+    return success(res, { message: 'El cliente no tiene pedidos para vaciar.', data: { customer: await buildCustomerSummary(customer), deleted_orders: 0 } });
+  }
+
+  const [activeOrders, settledOrders, chargedOrders] = await Promise.all([
+    Order.count({ where: { id: { [Op.in]: orderIds }, order_status: { [Op.in]: ['pending', 'accepted', 'preparing', 'waiting_delivery', 'on_the_way'] } } }),
+    CompanySettlementItem.count({ where: { order_id: { [Op.in]: orderIds } } }),
+    WalletTransaction.count({ where: { type: 'order_commission', reference_type: 'ORDER', reference_id: { [Op.in]: orderIds } } })
+  ]);
+
+  if (activeOrders) throw new AppError('No se pueden vaciar pedidos activos. Finalízalos o cancélalos antes de continuar.', 409);
+  if (settledOrders || chargedOrders) throw new AppError('No se pueden vaciar pedidos que ya tienen movimientos financieros o están incluidos en una liquidación.', 409);
+
+  const reviewedCompanyIds = await CompanyReview.findAll({
+    where: { order_id: { [Op.in]: orderIds } },
+    attributes: ['company_id'],
+    group: ['company_id'],
+    raw: true
+  });
+
+  await sequelize.transaction(async (transaction) => {
+    // These relations do not all cascade in existing database installations.
+    await Promise.all([
+      Delivery.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction }),
+      Payment.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction }),
+      CompanyReview.destroy({ where: { order_id: { [Op.in]: orderIds } }, transaction })
+    ]);
+    await Order.destroy({ where: { id: { [Op.in]: orderIds } }, transaction });
+
+    // Deleting a review changes the public company score, so refresh it in the
+    // same transaction instead of leaving a stale cached rating.
+    await Promise.all(reviewedCompanyIds.map(async ({ company_id: companyId }) => {
+      const result = await CompanyReview.findOne({
+        where: { company_id: companyId },
+        attributes: [[fn('AVG', col('rating')), 'average']],
+        raw: true,
+        transaction
+      });
+      await Company.update({ rating: Number(result?.average || 0).toFixed(2) }, { where: { id: companyId }, transaction });
+    }));
+  });
+
+  return success(res, {
+    message: `${orderIds.length} pedido(s) del cliente fueron eliminados.`,
+    data: { customer: await buildCustomerSummary(customer), deleted_orders: orderIds.length }
+  });
+});
+
+// A customer can have completed orders that must remain available for accounting.
+// Instead of deleting those transactions, remove identifying data and all
+// non-financial customer activity. This also makes the credentials unusable.
+const eraseAdminCustomerData = asyncHandler(async (req, res) => {
+  const roleId = await customerRoleId();
+  const customer = await User.findOne({ where: { id: req.params.id, role_id: roleId } });
+  if (!customer) throw new AppError('Customer not found', 404);
+
+  if (customer.status !== 'inactive') {
+    const activeItems = await Promise.all([
+      Order.count({ where: { customer_id: customer.id, order_status: { [Op.in]: ['pending', 'accepted', 'preparing', 'waiting_delivery', 'on_the_way'] } } }),
+      Appointment.count({ where: { customer_id: customer.id, status: { [Op.in]: ['pending', 'accepted'] } } })
+    ]);
+    if (activeItems.some(Boolean)) throw new AppError('No se puede borrar la cuenta mientras tenga pedidos o citas activos.', 409);
+  }
+
+  const anonymousId = `${customer.id}-${crypto.randomUUID().slice(0, 8)}`;
+  await sequelize.transaction(async (transaction) => {
+    await Promise.all([
+      AuthRefreshToken.destroy({ where: { user_id: customer.id }, transaction }),
+      PasswordResetToken.destroy({ where: { user_id: customer.id }, transaction }),
+      UserLegalAcceptance.destroy({ where: { user_id: customer.id }, transaction }),
+      Notification.destroy({ where: { user_id: customer.id }, transaction }),
+      PushToken.destroy({ where: { user_id: customer.id }, transaction }),
+      SupportTicket.destroy({ where: { customer_id: customer.id }, transaction }),
+      CompanyReview.destroy({ where: { customer_id: customer.id }, transaction }),
+      CouponUsage.destroy({ where: { user_id: customer.id }, transaction }),
+      Appointment.destroy({ where: { customer_id: customer.id }, transaction }),
+      Cart.destroy({ where: { customer_id: customer.id }, transaction })
+    ]);
+    // Past orders reference their delivery address, so anonymize it rather than
+    // breaking referential integrity.
+    await CustomerAddress.update({
+      label: 'Datos eliminados', recipient_name: 'Cliente eliminado', recipient_phone: '0000000000',
+      address_line: 'Datos eliminados', additional_details: null, neighborhood: null, city: null,
+      latitude: null, longitude: null, is_default: false
+    }, { where: { customer_id: customer.id }, transaction, paranoid: false });
+    await customer.update({
+      name: 'Usuario', last_name: 'eliminado', email: `deleted-${anonymousId}@deleted.invalid`,
+      phone: `9${String(customer.id).padStart(14, '0').slice(-14)}`, password: crypto.randomBytes(32).toString('hex'),
+      google_sub: null, apple_sub: null, profile_image: null, email_verified_at: null, status: 'inactive'
+    }, { transaction });
+  });
+
+  return success(res, { message: 'Los datos personales y registros no financieros del cliente fueron eliminados.', data: {} });
+});
+
 module.exports = {
   listAdminCustomers,
   getAdminCustomer,
-  activateAdminCustomer
+  activateAdminCustomer,
+  clearAdminCustomerOrders,
+  eraseAdminCustomerData
 };
