@@ -10,6 +10,7 @@ router.post('/wallet/topups', (_req, _res, next) => next(new AppError('Wallet to
 router.get('/team', companyPermissionMiddleware('company_team', 'view'), controller.listTeam);
 router.get('/team/roles', companyPermissionMiddleware('company_team', 'view'), controller.listAssignableRoles);
 router.post('/team', companyPermissionMiddleware('company_team', 'create'), (req, res, next) => { req.params.id = req.companyAccess.company.id; return controller.addTeamMember(req, res, next); });
+router.put('/team/:memberId', companyPermissionMiddleware('company_team', 'update'), controller.updateTeamMember);
 router.put('/team/:memberId/roles', companyPermissionMiddleware('company_team', 'update'), controller.updateTeamRoles);
 router.delete('/team/:memberId', companyPermissionMiddleware('company_team', 'delete'), controller.removeTeamMember);
 module.exports = router;

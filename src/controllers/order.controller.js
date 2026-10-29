@@ -10,6 +10,7 @@ const emailTemplateService = require('../services/email-template.service');
 const { assertCompanyOpen } = require('../services/company-availability.service');
 const { validateVariantSelections } = require('../services/variant-selection.service');
 const { emitToUser } = require('../websocket');
+const { renderOrderReceiptPdf } = require('../services/order-receipt-pdf.service');
 const { buildCheckout, getWompiConfiguration, getWompiTransaction } = require('../services/wompi.service');
 const orderInclude = [{ model: Company, as: 'company', attributes: ['id', 'name', 'type', 'rating'] }, { model: CompanyReview, as: 'review', attributes: ['id', 'rating', 'comment', 'created_at'] }, { model: CustomerAddress, as: 'address' }, { model: OrderItem, as: 'items', include: [{ model: OrderItemVariant, as: 'variants' }, { model: OrderItemIngredient, as: 'ingredientAdjustments' }] }, { model: OrderStatusHistory, as: 'history', include: [{ model: User, as: 'changedBy', attributes: ['id', 'name', 'last_name'] }] }];
 const orderNumber = () => `ORD-${Date.now()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
@@ -347,8 +348,16 @@ function customerStatusCopy(status) {
 
 async function transition(req, res, nextStatus, requiredCurrent, note, requireReason = false) { const order = await companyOrder(req.params.id, req.companyAccess.company.id); if (!requiredCurrent.includes(order.order_status)) throw new AppError('Invalid order status transition', 409); if (nextStatus === 'accepted' && order.payment_method === 'pse' && order.payment_status !== 'paid') throw new AppError('El pedido PSE no se puede aceptar hasta que Wompi confirme el pago.', 409); const names = req.companyAccess.companyUser.companyRoles.map((role) => role.name); if (names.includes('COOK') && !names.some((name) => ['OWNER', 'MANAGER'].includes(name)) && nextStatus !== 'preparing') throw new AppError('COOK can only mark an accepted order as preparing', 403); if (requireReason && !req.body.rejection_reason?.trim()) throw new AppError('A rejection reason is required', 422); await sequelize.transaction(async (transaction) => { await order.update({ order_status: nextStatus, rejection_reason: requireReason ? req.body.rejection_reason.trim() : order.rejection_reason }, { transaction }); await addHistory(order.id, nextStatus, req.auth.user.id, requireReason ? req.body.rejection_reason : note, transaction); }); const statusCopy = customerStatusCopy(nextStatus); await notifyUser(order.customer_id, { type: `ORDER_${nextStatus.toUpperCase()}`, title: statusCopy.title, message: statusCopy.message, data: { order_id: order.id, order_status: nextStatus } }); emitToUser(order.customer_id, 'order:status_changed', { order_id: order.id, order_status: nextStatus }); if (nextStatus === 'waiting_delivery') await notifyAvailableDrivers({ type: 'DELIVERY_AVAILABLE', title: 'Pedido disponible', message: 'Hay un pedido nuevo listo para entregar.', data: { order_id: order.id } }); return success(res, { message: 'Order status updated successfully', data: { order: await companyOrder(order.id, req.companyAccess.company.id) } }); }
 const getCompany = asyncHandler(async (req, res) => success(res, { message: 'Company order retrieved successfully', data: { order: await companyOrder(req.params.id, req.companyAccess.company.id) } }));
+const companyReceiptPdf = asyncHandler(async (req, res) => {
+  const order = await companyOrder(req.params.id, req.companyAccess.company.id);
+  const pdf = await renderOrderReceiptPdf(order.toJSON());
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${order.order_number}.pdf"`);
+  res.setHeader('Content-Length', pdf.length);
+  return res.send(pdf);
+});
 const accept = asyncHandler((req, res) => transition(req, res, 'accepted', ['pending'], 'Accepted by company'));
 const reject = asyncHandler((req, res) => transition(req, res, 'rejected', ['pending'], null, true));
 const preparing = asyncHandler((req, res) => transition(req, res, 'preparing', ['accepted'], 'Preparation started'));
 const waitingDelivery = asyncHandler((req, res) => transition(req, res, 'waiting_delivery', ['preparing'], 'Ready for delivery'));
-module.exports = { create, listCustomer, getCustomer, copyToCart, retryCustomerPayment, cancel, tracking, listCompany, getCompany, accept, reject, preparing, waitingDelivery };
+module.exports = { create, listCustomer, getCustomer, copyToCart, retryCustomerPayment, cancel, tracking, listCompany, getCompany, companyReceiptPdf, accept, reject, preparing, waitingDelivery };

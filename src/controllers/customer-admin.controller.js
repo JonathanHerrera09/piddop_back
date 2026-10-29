@@ -261,6 +261,23 @@ const clearAdminCustomerOrders = asyncHandler(async (req, res) => {
   });
 });
 
+const clearAdminCustomerAppointments = asyncHandler(async (req, res) => {
+  const roleId = await customerRoleId();
+  const customer = await User.findOne({ where: { id: req.params.id, role_id: roleId } });
+  if (!customer) throw new AppError('Customer not found', 404);
+
+  const activeAppointments = await Appointment.count({
+    where: { customer_id: customer.id, status: { [Op.in]: ['pending', 'accepted'] } }
+  });
+  if (activeAppointments) throw new AppError('No se pueden vaciar citas pendientes o aceptadas. Finalízalas o cancélalas antes de continuar.', 409);
+
+  const deletedAppointments = await Appointment.destroy({ where: { customer_id: customer.id } });
+  return success(res, {
+    message: deletedAppointments ? `${deletedAppointments} cita(s) del cliente fueron eliminadas.` : 'El cliente no tiene citas para vaciar.',
+    data: { customer: await buildCustomerSummary(customer), deleted_appointments: deletedAppointments }
+  });
+});
+
 // A customer can have completed orders that must remain available for accounting.
 // Instead of deleting those transactions, remove identifying data and all
 // non-financial customer activity. This also makes the credentials unusable.
@@ -313,5 +330,6 @@ module.exports = {
   getAdminCustomer,
   activateAdminCustomer,
   clearAdminCustomerOrders,
+  clearAdminCustomerAppointments,
   eraseAdminCustomerData
 };

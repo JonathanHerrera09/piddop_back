@@ -13,3 +13,13 @@ test('production CORS requires an explicit origin', () => {
 test('configured CORS origins are trimmed and split', () => {
   assert.deepEqual(allowedOrigins({ NODE_ENV: 'production', CORS_ORIGIN: ' https://panel.example.com,https://admin.example.com ' }), ['https://panel.example.com', 'https://admin.example.com']);
 });
+
+test('desktop Tauri origins can be configured for the installed application', () => {
+  assert.deepEqual(
+    allowedOrigins({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://panel.example.com,http://tauri.localhost,tauri://localhost',
+    }),
+    ['https://panel.example.com', 'http://tauri.localhost', 'tauri://localhost'],
+  );
+});
