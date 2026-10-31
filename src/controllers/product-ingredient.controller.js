@@ -4,6 +4,9 @@ const { success } = require('../utils/api-response');
 const { Product, ProductIngredient } = require('../models');
 const { buildIngredientLibrary, searchable } = require('../services/ingredient-library.service');
 const { Op, col, fn, where } = require('sequelize');
+const crypto = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
 
 async function ownProduct(productId, companyId) {
   const product = await Product.findOne({
@@ -137,4 +140,19 @@ const remove = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
-module.exports = { list, library, create, update, remove };
+const uploadImage = asyncHandler(async (req, res) => {
+  const product = await ownProduct(req.params.id, req.companyAccess.company.id);
+  const ingredient = await ownIngredient(req.params.ingredientId, product.id);
+  if (!req.file) throw new AppError('An image is required', 422);
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[req.file.mimetype];
+  const directory = path.join(__dirname, '..', '..', 'uploads', 'catalog-options');
+  await fs.mkdir(directory, { recursive: true });
+  const filename = `ingredient-${ingredient.id}-${crypto.randomUUID()}.${extension}`;
+  await fs.writeFile(path.join(directory, filename), req.file.buffer);
+  const previous = ingredient.image_url;
+  await ingredient.update({ image_url: `/uploads/catalog-options/${filename}` });
+  if (previous?.startsWith('/uploads/catalog-options/')) await fs.unlink(path.join(__dirname, '..', '..', previous)).catch(() => {});
+  return success(res, { message: 'Ingredient image uploaded successfully', data: { ingredient } });
+});
+
+module.exports = { list, library, create, update, remove, uploadImage };

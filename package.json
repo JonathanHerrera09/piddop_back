@@ -12,6 +12,7 @@
     "db:migrate:support-tickets": "node scripts/apply-support-tickets.js",
     "db:migrate:nested-variants": "node scripts/apply-nested-variants.js",
     "db:migrate:product-variant-prices": "node scripts/apply-product-variant-prices.js",
+    "db:migrate:catalog-option-images": "node scripts/apply-catalog-option-images.js",
     "db:seed": "sequelize-cli db:seed:all --config src/config/database.js",
     "dev:seeder": "node scripts/bootstrap-database.js",
     "db:cleanup-demo": "node scripts/deduplicate-demo-companies.js",

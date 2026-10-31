@@ -33,6 +33,7 @@ const popupUpload = imageUpload();
 const companyLogoUpload = imageUpload();
 
 const categoryAssetUpload = imageUpload();
+const catalogOptionImageUpload = imageUpload();
 
 function uploadErrorMiddleware(error, req, res, next) {
   if (error instanceof multer.MulterError) return next(new AppError('Invalid image upload', 422));
@@ -45,4 +46,4 @@ function uploadErrorMiddleware(error, req, res, next) {
   return next(error);
 }
 
-module.exports = { profileUpload, productUpload, popupUpload, companyLogoUpload, categoryAssetUpload, uploadErrorMiddleware, hasExpectedImageSignature, imageExtensions };
+module.exports = { profileUpload, productUpload, popupUpload, companyLogoUpload, categoryAssetUpload, catalogOptionImageUpload, uploadErrorMiddleware, hasExpectedImageSignature, imageExtensions };

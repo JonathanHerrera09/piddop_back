@@ -176,7 +176,7 @@ const ProductImage = sequelize.define('ProductImage', {
 }, { tableName: 'product_images', createdAt: 'created_at', updatedAt: false });
 const ProductIngredient = sequelize.define('ProductIngredient', {
   id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, product_id: DataTypes.BIGINT.UNSIGNED,
-  name: DataTypes.STRING(120), is_removable: DataTypes.BOOLEAN, is_default: DataTypes.BOOLEAN,
+  name: DataTypes.STRING(120), image_url: DataTypes.STRING(500), is_removable: DataTypes.BOOLEAN, is_default: DataTypes.BOOLEAN,
   status: DataTypes.ENUM('active', 'inactive'), sort_order: DataTypes.SMALLINT.UNSIGNED
 }, { tableName: 'product_ingredients', ...timestamps });
 const Variant = sequelize.define('Variant', {
@@ -187,7 +187,7 @@ const Variant = sequelize.define('Variant', {
 }, { tableName: 'variants', ...timestamps });
 const VariantOption = sequelize.define('VariantOption', {
   id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, variant_id: DataTypes.BIGINT.UNSIGNED,
-  name: DataTypes.STRING(100), status: DataTypes.ENUM('active', 'inactive'), sort_order: DataTypes.SMALLINT.UNSIGNED
+  name: DataTypes.STRING(100), image_url: DataTypes.STRING(500), status: DataTypes.ENUM('active', 'inactive'), sort_order: DataTypes.SMALLINT.UNSIGNED
 }, { tableName: 'variant_options', ...timestamps });
 const ProductVariant = sequelize.define('ProductVariant', {
   id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, product_id: DataTypes.BIGINT.UNSIGNED, variant_id: DataTypes.BIGINT.UNSIGNED, sort_order: DataTypes.SMALLINT.UNSIGNED

@@ -3,6 +3,9 @@ const asyncHandler = require('../utils/async-handler');
 const { success } = require('../utils/api-response');
 const { sequelize, Variant, VariantOption } = require('../models');
 const { Op } = require('sequelize');
+const crypto = require('crypto');
+const fs = require('fs/promises');
+const path = require('path');
 
 const childVariantInclude = {
   model: Variant,
@@ -170,4 +173,19 @@ const remove = asyncHandler(async (req, res) => {
   return res.status(204).send();
 });
 
-module.exports = { list, create, update, duplicate, remove, replaceVariantTree, createVariantTree, normalizeVariantTree };
+const uploadOptionImage = asyncHandler(async (req, res) => {
+  const option = await VariantOption.findByPk(req.params.optionId, { include: [{ model: Variant, required: true }] });
+  if (!option || String(option.Variant.company_id) !== String(req.companyAccess.company.id)) throw new AppError('Variant option not found', 404);
+  if (!req.file) throw new AppError('An image is required', 422);
+  const extension = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }[req.file.mimetype];
+  const directory = path.join(__dirname, '..', '..', 'uploads', 'catalog-options');
+  await fs.mkdir(directory, { recursive: true });
+  const filename = `option-${option.id}-${crypto.randomUUID()}.${extension}`;
+  await fs.writeFile(path.join(directory, filename), req.file.buffer);
+  const previous = option.image_url;
+  await option.update({ image_url: `/uploads/catalog-options/${filename}` });
+  if (previous?.startsWith('/uploads/catalog-options/')) await fs.unlink(path.join(__dirname, '..', '..', previous)).catch(() => {});
+  return success(res, { message: 'Variant option image uploaded successfully', data: { option } });
+});
+
+module.exports = { list, create, update, duplicate, remove, uploadOptionImage, replaceVariantTree, createVariantTree, normalizeVariantTree };

@@ -83,6 +83,7 @@ function buildProductCard(product) {
     options: (variant.options || []).map((option) => ({
       id: option.id,
       name: option.name,
+      image_url: normalizeImageUrl(option.image_url),
       additional_price: priceByOption.get(String(option.id)) || 0,
       child_variants: (option.childVariants || []).map(buildVariant)
     }))
@@ -98,6 +99,7 @@ function buildProductCard(product) {
     ingredients: (product.ingredients || []).map((ingredient) => ({
       id: ingredient.id,
       name: ingredient.name,
+      image_url: normalizeImageUrl(ingredient.image_url),
       is_removable: Boolean(ingredient.is_removable),
       is_default: Boolean(ingredient.is_default)
     })),
