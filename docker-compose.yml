@@ -1,6 +1,9 @@
 services:
   api:
     image: piddop-backend:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
     restart: unless-stopped
     env_file:
       - .env
