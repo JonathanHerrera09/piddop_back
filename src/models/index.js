@@ -294,6 +294,13 @@ const SupportTicket = sequelize.define('SupportTicket', {
   message: { type: DataTypes.TEXT, allowNull: false },
   status: { type: DataTypes.ENUM('open', 'in_progress', 'closed'), allowNull: false, defaultValue: 'open' }
 }, { tableName: 'support_tickets', ...timestamps });
+const SupportTicketMessage = sequelize.define('SupportTicketMessage', {
+  id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true },
+  support_ticket_id: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+  author_id: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false },
+  message: { type: DataTypes.TEXT, allowNull: false },
+  is_internal: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false }
+}, { tableName: 'support_ticket_messages', ...timestamps });
 const Professional = sequelize.define('Professional', { id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, company_id: DataTypes.BIGINT.UNSIGNED, user_id: DataTypes.BIGINT.UNSIGNED, name: DataTypes.STRING(150), specialty: DataTypes.STRING(150), phone: DataTypes.STRING(30), email: DataTypes.STRING(191), photo: DataTypes.STRING(500), description: DataTypes.TEXT, status: DataTypes.ENUM('active', 'inactive') }, { tableName: 'professionals', ...timestamps });
 const Service = sequelize.define('Service', { id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, company_id: DataTypes.BIGINT.UNSIGNED, name: DataTypes.STRING(180), description: DataTypes.TEXT, duration_minutes: DataTypes.SMALLINT.UNSIGNED, price: DataTypes.DECIMAL(12, 2), status: DataTypes.ENUM('active', 'inactive') }, { tableName: 'services', ...timestamps });
 const ServiceProfessional = sequelize.define('ServiceProfessional', { id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true }, service_id: DataTypes.BIGINT.UNSIGNED, professional_id: DataTypes.BIGINT.UNSIGNED }, { tableName: 'service_professionals', createdAt: 'created_at', updatedAt: false });
@@ -309,6 +316,9 @@ User.hasMany(PasswordResetToken, { foreignKey: 'user_id' });
 User.hasMany(UserLegalAcceptance, { foreignKey: 'user_id' });
 User.hasMany(SupportTicket, { as: 'supportTickets', foreignKey: 'customer_id' });
 SupportTicket.belongsTo(User, { as: 'customer', foreignKey: 'customer_id' });
+SupportTicket.hasMany(SupportTicketMessage, { as: 'messages', foreignKey: 'support_ticket_id' });
+SupportTicketMessage.belongsTo(SupportTicket, { as: 'ticket', foreignKey: 'support_ticket_id' });
+SupportTicketMessage.belongsTo(User, { as: 'author', foreignKey: 'author_id' });
 CompanyUser.belongsTo(User, { as: 'user', foreignKey: 'user_id' });
 CompanyUser.belongsTo(Company, { as: 'company', foreignKey: 'company_id' });
 CompanyUser.belongsToMany(Role, { as: 'companyRoles', through: CompanyUserRole, foreignKey: 'company_user_id', otherKey: 'role_id' });
@@ -353,4 +363,4 @@ Notification.belongsTo(User, { as: 'user', foreignKey: 'user_id' }); User.hasMan
 PushToken.belongsTo(User, { as: 'user', foreignKey: 'user_id' }); User.hasMany(PushToken, { as: 'pushTokens', foreignKey: 'user_id' });
 Company.hasMany(Professional, { as: 'professionals', foreignKey: 'company_id' }); Professional.belongsTo(Company, { as: 'company', foreignKey: 'company_id' }); Professional.belongsTo(User, { as: 'user', foreignKey: 'user_id' }); User.hasOne(Professional, { as: 'professionalProfile', foreignKey: 'user_id' }); Company.hasMany(Service, { as: 'services', foreignKey: 'company_id' }); Service.belongsTo(Company, { as: 'company', foreignKey: 'company_id' }); Service.belongsToMany(Professional, { as: 'professionals', through: ServiceProfessional, foreignKey: 'service_id', otherKey: 'professional_id' }); Professional.belongsToMany(Service, { as: 'services', through: ServiceProfessional, foreignKey: 'professional_id', otherKey: 'service_id' }); Professional.hasMany(ProfessionalSchedule, { as: 'schedules', foreignKey: 'professional_id' }); Company.hasMany(Appointment, { as: 'appointments', foreignKey: 'company_id' }); Appointment.belongsTo(Company, { as: 'company', foreignKey: 'company_id' }); Appointment.belongsTo(Service, { as: 'service', foreignKey: 'service_id' }); Appointment.belongsTo(Professional, { as: 'professional', foreignKey: 'professional_id' }); Appointment.belongsTo(User, { as: 'customer', foreignKey: 'customer_id' });
 
-module.exports = { sequelize, Role, User, AuthRefreshToken, PasswordResetToken, EmailVerificationCode, UserLegalAcceptance, Permission, RolePermission, Company, CompanyWallet, WalletTransaction, CompanySettlement, CompanySettlementItem, AuditLog, CompanyUser, CompanyUserRole, Category, Product, ProductImage, ProductIngredient, Variant, VariantOption, ProductVariant, ProductVariantOptionPrice, CustomerAddress, Cart, CartItem, CartItemVariant, CartItemIngredient, Order, OrderItem, OrderItemVariant, OrderItemIngredient, OrderStatusHistory, CompanyReview, DeliveryDriver, Delivery, Coupon, CouponUsage, Payment, Notification, PushToken, Popup, HomePromotion, PlatformSetting, SupportTicket, Professional, Service, ServiceProfessional, ProfessionalSchedule, Appointment };
+module.exports = { sequelize, Role, User, AuthRefreshToken, PasswordResetToken, EmailVerificationCode, UserLegalAcceptance, Permission, RolePermission, Company, CompanyWallet, WalletTransaction, CompanySettlement, CompanySettlementItem, AuditLog, CompanyUser, CompanyUserRole, Category, Product, ProductImage, ProductIngredient, Variant, VariantOption, ProductVariant, ProductVariantOptionPrice, CustomerAddress, Cart, CartItem, CartItemVariant, CartItemIngredient, Order, OrderItem, OrderItemVariant, OrderItemIngredient, OrderStatusHistory, CompanyReview, DeliveryDriver, Delivery, Coupon, CouponUsage, Payment, Notification, PushToken, Popup, HomePromotion, PlatformSetting, SupportTicket, SupportTicketMessage, Professional, Service, ServiceProfessional, ProfessionalSchedule, Appointment };

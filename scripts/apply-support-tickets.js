@@ -34,6 +34,21 @@ async function main() {
     await queryInterface.addIndex('support_tickets', ['customer_id'], { name: 'support_tickets_customer_idx' });
     console.log('Added support_tickets_customer_idx.');
   }
+
+  const messageExists = tables.some((table) => String(table).toLowerCase() === 'support_ticket_messages');
+  if (!messageExists) {
+    await queryInterface.createTable('support_ticket_messages', {
+      id: { type: DataTypes.BIGINT.UNSIGNED, primaryKey: true, autoIncrement: true, allowNull: false },
+      support_ticket_id: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false, references: { model: 'support_tickets', key: 'id' }, onDelete: 'CASCADE', onUpdate: 'CASCADE' },
+      author_id: { type: DataTypes.BIGINT.UNSIGNED, allowNull: false, references: { model: 'users', key: 'id' }, onDelete: 'CASCADE', onUpdate: 'CASCADE' },
+      message: { type: DataTypes.TEXT, allowNull: false },
+      is_internal: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+      created_at: { type: DataTypes.DATE, allowNull: false, defaultValue: literal('CURRENT_TIMESTAMP') },
+      updated_at: { type: DataTypes.DATE, allowNull: false, defaultValue: literal('CURRENT_TIMESTAMP') }
+    });
+    await queryInterface.addIndex('support_ticket_messages', ['support_ticket_id', 'created_at'], { name: 'support_ticket_messages_ticket_created_idx' });
+    console.log('Created support_ticket_messages.');
+  }
 }
 
 main()
