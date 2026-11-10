@@ -21,6 +21,11 @@ async function customerRoleId() {
   return role.id;
 }
 
+function normalizePhone(value) {
+  const phone = typeof value === 'string' ? value.trim().replace(/[\s().-]/g, '') : '';
+  return /^\+?\d{7,15}$/.test(phone) ? phone : null;
+}
+
 async function buildCustomerSummary(customer) {
   const { from, to } = monthRange();
 
@@ -173,6 +178,44 @@ const getAdminCustomer = asyncHandler(async (req, res) => {
     message: 'Customer retrieved successfully',
     data: { customer: await buildCustomerSummary(customer) }
   });
+});
+
+const updateAdminCustomer = asyncHandler(async (req, res) => {
+  const roleId = await customerRoleId();
+  const customer = await User.findOne({ where: { id: req.params.id, role_id: roleId } });
+  if (!customer) throw new AppError('Customer not found', 404);
+
+  const changes = Object.fromEntries(
+    Object.entries(req.body || {}).filter(([key, value]) =>
+      ['name', 'last_name', 'email', 'phone'].includes(key) && typeof value === 'string'
+    )
+  );
+  if (!Object.keys(changes).length) throw new AppError('At least one customer field is required', 422);
+  Object.keys(changes).forEach((key) => { changes[key] = changes[key].trim(); });
+
+  const errors = [];
+  if (changes.name !== undefined && (!changes.name || changes.name.length > 100)) errors.push({ field: 'name', message: 'Ingresa un nombre de hasta 100 caracteres.' });
+  if (changes.last_name !== undefined && (!changes.last_name || changes.last_name.length > 100)) errors.push({ field: 'last_name', message: 'Ingresa un apellido de hasta 100 caracteres.' });
+  if (changes.email !== undefined) {
+    changes.email = changes.email.toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(changes.email) || changes.email.length > 150) errors.push({ field: 'email', message: 'Ingresa un correo valido.' });
+  }
+  if (changes.phone !== undefined) {
+    const phone = normalizePhone(changes.phone);
+    if (!phone) errors.push({ field: 'phone', message: 'Ingresa un telefono valido (7 a 15 digitos).' });
+    else changes.phone = phone;
+  }
+  if (errors.length) throw new AppError('Revisa los datos del cliente.', 422, errors);
+
+  try {
+    await customer.update(changes);
+  } catch (error) {
+    if (error?.name === 'SequelizeUniqueConstraintError' || error?.original?.code === 'ER_DUP_ENTRY') {
+      throw new AppError('El correo o telefono ya esta registrado.', 409);
+    }
+    throw error;
+  }
+  return success(res, { message: 'Customer updated successfully', data: { customer: await buildCustomerSummary(customer) } });
 });
 
 const activateAdminCustomer = asyncHandler(async (req, res) => {
@@ -328,6 +371,7 @@ const eraseAdminCustomerData = asyncHandler(async (req, res) => {
 module.exports = {
   listAdminCustomers,
   getAdminCustomer,
+  updateAdminCustomer,
   activateAdminCustomer,
   clearAdminCustomerOrders,
   clearAdminCustomerAppointments,
