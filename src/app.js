@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('node:path');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -33,6 +34,15 @@ function createApp() {
   app.use(express.urlencoded({ extended: false, limit: '1mb' }));
   app.use('/uploads', express.static('uploads', {
     setHeaders(res) {
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    }
+  }));
+  app.use('/downloads', express.static(path.join(process.cwd(), 'public', 'downloads'), {
+    setHeaders(res) {
+      // The stable filename always represents the newest installer, so clients
+      // must revalidate it instead of retaining an old application release.
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Content-Disposition', 'attachment; filename="Piddop-Setup.exe"');
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     }
   }));
