@@ -89,6 +89,8 @@ const Company = sequelize.define('Company', {
   availability_mode: DataTypes.ENUM('automatic', 'open', 'closed'),
   business_hours: DataTypes.JSON,
   timezone: DataTypes.STRING(64),
+  auto_accept_orders: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+  auto_accept_appointments: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   rating: DataTypes.DECIMAL(3, 2),
   commission_percentage: DataTypes.DECIMAL(5, 2),
   status: DataTypes.ENUM('pending', 'active', 'suspended', 'inactive')

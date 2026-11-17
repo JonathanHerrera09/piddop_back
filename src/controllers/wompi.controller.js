@@ -1,7 +1,7 @@
 const asyncHandler = require('../utils/async-handler');
 const AppError = require('../utils/app-error');
 const { success } = require('../utils/api-response');
-const { sequelize, AuditLog, Company, Order, Payment, User } = require('../models');
+const { sequelize, AuditLog, Company, Order, OrderStatusHistory, Payment, User } = require('../models');
 const { notifyCompany, notifyUser, emitCompany } = require('../services/notification.service');
 const emailTemplateService = require('../services/email-template.service');
 const { emitToUser } = require('../websocket');
@@ -91,8 +91,11 @@ const events = asyncHandler(async (req, res) => {
         finalized_at: transaction.finalized_at || null
       }
     }, { transaction: databaseTransaction });
-    await order.update({ payment_status: nextStatus }, { transaction: databaseTransaction });
-    if (!wasPaid && nextStatus === 'paid') notification = { kind: wasCancelled ? 'approved_after_cancel' : 'approved', order };
+    const company = nextStatus === 'paid' && !wasCancelled ? await Company.findByPk(order.company_id, { transaction: databaseTransaction }) : null;
+    const automaticallyAccepted = nextStatus === 'paid' && !wasCancelled && order.order_status === 'pending' && Boolean(company?.auto_accept_orders);
+    await order.update({ payment_status: nextStatus, ...(automaticallyAccepted ? { order_status: 'accepted' } : {}) }, { transaction: databaseTransaction });
+    if (automaticallyAccepted) await OrderStatusHistory.create({ order_id: order.id, status: 'accepted', changed_by_user_id: null, notes: 'Pedido aceptado automáticamente' }, { transaction: databaseTransaction });
+    if (!wasPaid && nextStatus === 'paid') notification = { kind: wasCancelled ? 'approved_after_cancel' : 'approved', order, automaticallyAccepted };
     if (previousStatus !== nextStatus && nextStatus === 'failed') notification = { kind: 'failed', order };
   });
 
@@ -107,10 +110,15 @@ const events = asyncHandler(async (req, res) => {
     const { order } = notification;
     await Promise.all([
       notifyUser(order.customer_id, { type: 'PAYMENT_APPROVED', title: 'Pago PSE aprobado', message: `Tu pago del pedido ${order.order_number} fue aprobado.`, data: { order_id: order.id } }),
-      notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: 'Nuevo pedido pagado', message: `El pedido ${order.order_number} fue pagado por PSE y esta pendiente por revisar.`, data: { order_id: order.id } })
+      notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: notification.automaticallyAccepted ? 'Nuevo pedido aceptado automáticamente' : 'Nuevo pedido pagado', message: notification.automaticallyAccepted ? `El pedido ${order.order_number} fue pagado y aceptado automáticamente.` : `El pedido ${order.order_number} fue pagado por PSE y esta pendiente por revisar.`, data: { order_id: order.id, order_status: notification.automaticallyAccepted ? 'accepted' : 'pending' } })
     ]);
-    await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: order.order_status });
+    const orderStatus = notification.automaticallyAccepted ? 'accepted' : 'pending';
+    await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: orderStatus });
     emitToUser(order.customer_id, 'order:payment_changed', { order_id: order.id, payment_status: 'paid' });
+    if (notification.automaticallyAccepted) {
+      await notifyUser(order.customer_id, { type: 'ORDER_ACCEPTED', title: 'Pedido aceptado', message: 'Tu pedido fue aceptado por el negocio y pronto comenzaran a prepararlo.', data: { order_id: order.id, order_status: 'accepted' } });
+      emitToUser(order.customer_id, 'order:status_changed', { order_id: order.id, order_status: 'accepted' });
+    }
     if (process.env.NODE_ENV !== 'test' && !process.env.NODE_TEST_CONTEXT) {
       const [fullOrder, customer, company] = await Promise.all([
         Order.findByPk(order.id),

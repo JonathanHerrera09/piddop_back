@@ -53,15 +53,24 @@ const create = asyncHandler(async (req, res) => {
     if (cart.coupon_id) { coupon = await Coupon.findByPk(cart.coupon_id, { transaction, lock: transaction.LOCK.UPDATE }); discount = await validateCoupon({ coupon, userId: req.auth.user.id, cart, subtotal, categoryIds: lines.map((line) => line.product.category_id), transaction }); }
     const deliveryFee = 3000; const total = subtotal - discount + deliveryFee; const commission = walletService.calculateCompanyCommission({ company, subtotal });
     await walletService.assertCompanyCanCoverEstimatedCommission({ company, companyId: company.id, commissionAmount: commission, transaction });
-    const created = await Order.create({ order_number: orderNumber(), customer_id: req.auth.user.id, company_id: cart.company_id, address_id: address.id, subtotal, delivery_fee: deliveryFee, discount, total, commission_amount: commission, coupon_id: coupon?.id || null, payment_method: req.body.payment_method, payment_status: 'pending', order_status: 'pending', delivery_code: deliveryCode(), customer_notes: req.body.customer_notes || null }, { transaction });
+    const autoAccept = req.body.payment_method === 'cash' && company.auto_accept_orders;
+    const created = await Order.create({ order_number: orderNumber(), customer_id: req.auth.user.id, company_id: cart.company_id, address_id: address.id, subtotal, delivery_fee: deliveryFee, discount, total, commission_amount: commission, coupon_id: coupon?.id || null, payment_method: req.body.payment_method, payment_status: 'pending', order_status: autoAccept ? 'accepted' : 'pending', delivery_code: deliveryCode(), customer_notes: req.body.customer_notes || null }, { transaction });
     for (const line of lines) { const orderItem = await OrderItem.create({ order_id: created.id, product_id: line.product.id, product_name: line.product.name, unit_base_price: line.product.base_price, quantity: line.item.quantity, variants_total: line.optionsTotal, line_total: line.lineTotal, customer_notes: line.item.customer_notes }, { transaction }); for (const variant of line.item.variants) await OrderItemVariant.create({ order_item_id: orderItem.id, variant_name: variant.option.Variant?.name || 'Option', option_name: variant.option.name, additional_price: variant.additional_price }, { transaction }); for (const ingredient of line.item.ingredientAdjustments) await OrderItemIngredient.create({ order_item_id: orderItem.id, ingredient_name: ingredient.ingredient?.name || 'Ingrediente', action: ingredient.action }, { transaction }); }
     if (coupon) { await CouponUsage.create({ coupon_id: coupon.id, user_id: req.auth.user.id, order_id: created.id, discount_amount: discount }, { transaction }); await coupon.increment('usage_count', { by: 1, transaction }); }
     await Payment.create({ order_id: created.id, method: req.body.payment_method, status: 'pending', amount: total, provider: req.body.payment_method === 'pse' ? 'wompi' : null, provider_reference: req.body.payment_method === 'pse' ? created.order_number : null }, { transaction });
-    await addHistory(created.id, 'pending', req.auth.user.id, 'Pedido creado', transaction); await cart.destroy({ transaction }); return created;
+    await addHistory(created.id, 'pending', req.auth.user.id, 'Pedido creado', transaction);
+    if (autoAccept) await addHistory(created.id, 'accepted', null, 'Pedido aceptado automáticamente', transaction);
+    await cart.destroy({ transaction }); return created;
   });
   if (order.payment_method === 'cash') {
-    await notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: 'Nuevo pedido', message: `El pedido ${order.order_number} esta pendiente por revisar.`, data: { order_id: order.id } });
-    await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: 'pending' });
+    const automaticallyAccepted = order.order_status === 'accepted';
+    await notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: automaticallyAccepted ? 'Nuevo pedido aceptado automáticamente' : 'Nuevo pedido', message: automaticallyAccepted ? `El pedido ${order.order_number} fue aceptado automáticamente.` : `El pedido ${order.order_number} esta pendiente por revisar.`, data: { order_id: order.id, order_status: order.order_status } });
+    await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: order.order_status });
+    if (automaticallyAccepted) {
+      const statusCopy = customerStatusCopy('accepted');
+      await notifyUser(order.customer_id, { type: 'ORDER_ACCEPTED', title: statusCopy.title, message: statusCopy.message, data: { order_id: order.id, order_status: 'accepted' } });
+      emitToUser(order.customer_id, 'order:status_changed', { order_id: order.id, order_status: 'accepted' });
+    }
   }
   const customerOrder = await ownOrder(order.id, req.auth.user.id);
   const wompiPayment = order.payment_method === 'pse'
@@ -177,16 +186,23 @@ function assertWompiTransactionMatchesPayment(transaction, payment) {
   }
 }
 
-async function announceReconciledWompiPayment(order) {
+async function announceReconciledWompiPayment(order, automaticallyAccepted = false) {
   await Promise.all([
     notifyUser(order.customer_id, { type: 'PAYMENT_APPROVED', title: 'Pago PSE aprobado', message: `Tu pago del pedido ${order.order_number} fue aprobado.`, data: { order_id: order.id } }),
-    notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: 'Nuevo pedido pagado', message: `El pedido ${order.order_number} fue pagado por PSE y esta pendiente por revisar.`, data: { order_id: order.id } })
+    notifyCompany(order.company_id, { type: 'ORDER_CREATED', title: automaticallyAccepted ? 'Nuevo pedido aceptado automáticamente' : 'Nuevo pedido pagado', message: automaticallyAccepted ? `El pedido ${order.order_number} fue pagado y aceptado automáticamente.` : `El pedido ${order.order_number} fue pagado por PSE y esta pendiente por revisar.`, data: { order_id: order.id, order_status: automaticallyAccepted ? 'accepted' : 'pending' } })
   ]);
-  await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: order.order_status });
+  const orderStatus = automaticallyAccepted ? 'accepted' : 'pending';
+  await emitCompany(order.company_id, 'order:created', { order_id: order.id, order_status: orderStatus });
+  if (automaticallyAccepted) {
+    const statusCopy = customerStatusCopy('accepted');
+    await notifyUser(order.customer_id, { type: 'ORDER_ACCEPTED', title: statusCopy.title, message: statusCopy.message, data: { order_id: order.id, order_status: 'accepted' } });
+    emitToUser(order.customer_id, 'order:status_changed', { order_id: order.id, order_status: 'accepted' });
+  }
 }
 
 async function reconcileApprovedWompiPayment(orderId, wompiTransaction) {
   let changed = false;
+  let automaticallyAccepted = false;
   await sequelize.transaction(async (transaction) => {
     const lockedPayment = await Payment.findOne({ where: { order_id: orderId, method: 'pse' }, transaction, lock: transaction.LOCK.UPDATE });
     const lockedOrder = await Order.findByPk(orderId, { transaction, lock: transaction.LOCK.UPDATE });
@@ -202,10 +218,13 @@ async function reconcileApprovedWompiPayment(orderId, wompiTransaction) {
         finalized_at: wompiTransaction.finalized_at || null
       }
     }, { transaction });
-    await lockedOrder.update({ payment_status: 'paid' }, { transaction });
+    const company = await Company.findByPk(lockedOrder.company_id, { transaction });
+    automaticallyAccepted = lockedOrder.order_status === 'pending' && Boolean(company?.auto_accept_orders);
+    await lockedOrder.update({ payment_status: 'paid', ...(automaticallyAccepted ? { order_status: 'accepted' } : {}) }, { transaction });
+    if (automaticallyAccepted) await addHistory(lockedOrder.id, 'accepted', null, 'Pedido aceptado automáticamente', transaction);
     changed = true;
   });
-  return changed;
+  return { changed, automaticallyAccepted };
 }
 
 async function retryPayment(req, res) {
@@ -224,8 +243,8 @@ async function retryPayment(req, res) {
     assertWompiTransactionMatchesPayment(wompiTransaction, payment);
 
     if (wompiTransaction.status === 'APPROVED') {
-      const changed = await reconcileApprovedWompiPayment(order.id, wompiTransaction);
-      if (changed) await announceReconciledWompiPayment(order);
+      const reconciliation = await reconcileApprovedWompiPayment(order.id, wompiTransaction);
+      if (reconciliation.changed) await announceReconciledWompiPayment(order, reconciliation.automaticallyAccepted);
       emitToUser(order.customer_id, 'order:payment_changed', { order_id: order.id, payment_status: 'paid' });
       return success(res, { message: 'Payment was already approved', data: { order: await ownOrder(order.id, req.auth.user.id), payment: null } });
     }
@@ -278,8 +297,8 @@ const cancel = asyncHandler(async (req, res) => {
     const wompiTransaction = await getWompiTransaction(storedWompiTransactionId(payment), configuration);
     assertWompiTransactionMatchesPayment(wompiTransaction, payment);
     if (wompiTransaction.status === 'APPROVED') {
-      const changed = await reconcileApprovedWompiPayment(order.id, wompiTransaction);
-      if (changed) await announceReconciledWompiPayment(order);
+      const reconciliation = await reconcileApprovedWompiPayment(order.id, wompiTransaction);
+      if (reconciliation.changed) await announceReconciledWompiPayment(order, reconciliation.automaticallyAccepted);
       emitToUser(order.customer_id, 'order:payment_changed', { order_id: order.id, payment_status: 'paid' });
       throw new AppError('El pago ya fue aprobado y el pedido no se puede cancelar como no pagado.', 409);
     }

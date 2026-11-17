@@ -22,6 +22,7 @@ const {
   isFutureAppointmentSlot,
 } = require("../services/company-availability.service");
 const { paginate } = require("../utils/pagination");
+const { notifyCompany, notifyUser, emitCompany } = require("../services/notification.service");
 
 const appointmentInclude = [
   {
@@ -527,6 +528,7 @@ const createAppointment = asyncHandler(async (req, res) => {
     });
     if (conflict)
       throw new AppError("Selected time is no longer available", 409);
+    const company = await Company.findByPk(service.company_id, { transaction });
     return Appointment.create(
       {
         appointment_number: `APT-${Date.now()}-${crypto.randomBytes(2).toString("hex")}`,
@@ -538,12 +540,19 @@ const createAppointment = asyncHandler(async (req, res) => {
         start_time: startTime,
         end_time: endTime,
         price: service.price,
-        status: "pending",
+        status: company?.auto_accept_appointments ? "accepted" : "pending",
         customer_notes: req.body.customer_notes || null,
       },
       { transaction },
     );
   });
+  if (appointment.status === "accepted") {
+    await Promise.all([
+      notifyCompany(appointment.company_id, { type: "APPOINTMENT_CREATED", title: "Nueva cita aceptada automáticamente", message: `La cita ${appointment.appointment_number} fue aceptada automáticamente.`, data: { appointment_id: appointment.id, status: appointment.status } }),
+      notifyUser(appointment.customer_id, { type: "APPOINTMENT_ACCEPTED", title: "Cita aceptada", message: "Tu cita fue aceptada por el negocio.", data: { appointment_id: appointment.id, status: appointment.status } }),
+    ]);
+    await emitCompany(appointment.company_id, "appointment:created", { appointment_id: appointment.id, status: appointment.status });
+  }
   return success(res, {
     statusCode: 201,
     message: "Appointment created successfully",
@@ -649,7 +658,7 @@ const listCompanyAppointments = asyncHandler(async (req, res) => {
   });
 });
 async function changeAppointmentStatus(appointment, status) {
-  const transitions = { pending: ["accepted"], accepted: ["completed"] };
+  const transitions = { pending: ["accepted", "cancelled"], accepted: ["completed", "cancelled"] };
   if (!transitions[appointment.status]?.includes(status))
     throw new AppError(
       `Cannot change appointment from ${appointment.status} to ${status}`,

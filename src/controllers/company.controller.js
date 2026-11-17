@@ -111,7 +111,7 @@ const updateOwnCompany = asyncHandler(async (req, res) => {
   if (Object.hasOwn(req.body, 'availability_mode')) availability.availability_mode = req.body.availability_mode;
   if (Object.hasOwn(req.body, 'business_hours')) availability.business_hours = normalizeBusinessHours(req.body.business_hours);
   await company.update({
-    ...Object.fromEntries(Object.entries(req.body).filter(([key]) => ['name', 'description', 'phone', 'email', 'logo', 'address', 'latitude', 'longitude'].includes(key))),
+    ...Object.fromEntries(Object.entries(req.body).filter(([key]) => ['name', 'description', 'phone', 'email', 'logo', 'address', 'latitude', 'longitude', 'auto_accept_orders', 'auto_accept_appointments'].includes(key))),
     ...availability
   });
   return success(res, { message: 'Own company updated successfully', data: { company } });
