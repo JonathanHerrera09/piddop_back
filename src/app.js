@@ -11,9 +11,7 @@ const { allowedOrigins } = require('./config/cors');
 const { swaggerEnabled } = require('./config/security');
 
 function createApp() {
-  // The API authenticates exclusively with Authorization: Bearer tokens, never cookies.
-  // Browser cross-site requests therefore cannot carry credentials; CORS remains restricted.
-  // nosemgrep: javascript.express.security.audit.express-check-csurf-middleware-usage
+
   const app = express();
   const origins = allowedOrigins();
   const trustProxy = process.env.TRUST_PROXY;
@@ -24,8 +22,6 @@ function createApp() {
   } else if (trustProxy && !Number.isNaN(Number(trustProxy))) {
     app.set('trust proxy', Number(trustProxy));
   } else {
-    // Trusting an unspecified proxy lets clients spoof their IP through X-Forwarded-For,
-    // which defeats IP based rate limiting. Enable it explicitly when a trusted proxy exists.
     app.set('trust proxy', false);
   }
   app.use(helmet());
