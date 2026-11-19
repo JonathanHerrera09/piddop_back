@@ -3,6 +3,7 @@ const { createApp } = require('./app');
 const { sequelize } = require('./models');
 const { configureSocket } = require('./websocket');
 const { validateSecurityConfiguration } = require('./config/security');
+const { startAppointmentReminderJob } = require('./jobs/appointment-reminder.job');
 
 const port = Number(process.env.PORT || 3000);
 
@@ -18,6 +19,7 @@ async function startServer() {
     console.log(`API listening on http://localhost:${port}`);
     console.log(`Swagger available at http://localhost:${port}/api/docs`);
   });
+  startAppointmentReminderJob();
 
   const shutdown = async () => {
     server.close(async () => {
