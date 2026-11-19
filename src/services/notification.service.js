@@ -14,6 +14,32 @@ async function notifyUser(userId, { type, title, message, data = {}, app_scope: 
   return notification;
 }
 
+// Campaigns are delivered to many users at once. Persist the notification first
+// so recipients can still see it in their inbox if the operating system delays
+// or suppresses the push notification.
+async function notifyUsers(userIds, { type, title, message, data = {}, app_scope: appScope = 'customer' }) {
+  const uniqueUserIds = [...new Set(userIds.map(Number).filter(Number.isSafeInteger))];
+  if (!uniqueUserIds.length) return { notification_count: 0, push: { tickets: [], receipts: [] } };
+
+  const notifications = await Notification.bulkCreate(uniqueUserIds.map((userId) => ({
+    user_id: userId,
+    type,
+    title,
+    message,
+    data
+  })));
+  notifications.forEach((notification) => emitToUser(notification.user_id, 'notification:new', notification.toJSON()));
+
+  const push = await sendPushToUsers(uniqueUserIds, {
+    body: message,
+    data,
+    title,
+    type
+  }, { appScope });
+
+  return { notification_count: notifications.length, push };
+}
+
 async function notifyCompany(companyId, payload) {
   const members = await CompanyUser.findAll({ where: { company_id: companyId }, attributes: ['user_id'] });
   return Promise.all(members.map((member) => notifyUser(member.user_id, payload)));
@@ -32,4 +58,4 @@ async function notifyAvailableDrivers(payload) {
   }));
 }
 
-module.exports = { notifyUser, notifyCompany, notifyAvailableDrivers, emitCompany };
+module.exports = { notifyUser, notifyUsers, notifyCompany, notifyAvailableDrivers, emitCompany };

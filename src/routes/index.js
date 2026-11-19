@@ -30,6 +30,7 @@ const emailTemplateRoutes = require('./email-template.routes');
 const wompiRoutes = require('./wompi.routes');
 const reviewRoutes = require('./review.routes');
 const supportTicketRoutes = require('./support-ticket.routes');
+const adminPushNotificationRoutes = require('./admin-push-notification.routes');
 
 const router = express.Router();
 
@@ -77,6 +78,7 @@ router.use('/mobile', mobileRoutes);
 router.use('/', supportTicketRoutes.customer);
 router.use('/admin', supportTicketRoutes.admin);
 router.use('/admin', settlementRoutes.admin);
+router.use('/admin', adminPushNotificationRoutes);
 router.use('/company', settlementRoutes.company);
 
 module.exports = router;
